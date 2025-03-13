@@ -1,0 +1,22 @@
+#virtual environments
+venv/
+.venv/
+
+#python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+#env variables 
+.env
+*.env
+
+#docker files
+.dockerignore
+postgres_data/
+
+#compiled & editor files
+migrations/
+.vscode/
+.idea/
