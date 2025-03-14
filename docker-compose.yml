@@ -14,13 +14,22 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7
+    container_name: weather-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
   backend:
     build: .
     container_name: fastapi-weather-backend
     depends_on:
       - db
+      - redis
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:270792@db:5432/weather_db"
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "8000:8000"
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

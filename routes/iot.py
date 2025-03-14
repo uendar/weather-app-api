@@ -16,13 +16,16 @@ iot_running = False
 
 sensor_ids = [
     {"sensor_id": "ATH-TEMP", "station_code": "ATH-001", "measurement_property": "temperature"},
-    {"sensor_id": "ATH-HUMI", "station_code": "ATH-001", "measurement_property": "humidity"},
+    {"sensor_id": "ATH-HUM", "station_code": "ATH-001",
+        "measurement_property": "humidity"},
     {"sensor_id": "ATH-WIND", "station_code": "ATH-001", "measurement_property": "wind"},
     {"sensor_id": "TIR-TEMP", "station_code": "TIR-001", "measurement_property": "temperature"},
-    {"sensor_id": "TIR-HUMI", "station_code": "TIR-001", "measurement_property": "humidity"},
+    {"sensor_id": "TIR-HUM", "station_code": "TIR-001",
+        "measurement_property": "humidity"},
     {"sensor_id": "TIR-WIND", "station_code": "TIR-001", "measurement_property": "wind"},
     {"sensor_id": "LON-TEMP", "station_code": "LON-001", "measurement_property": "temperature"},
-    {"sensor_id": "LON-HUMI", "station_code": "LON-001", "measurement_property": "humidity"},
+    {"sensor_id": "LON-HUM", "station_code": "LON-001",
+        "measurement_property": "humidity"},
     {"sensor_id": "LON-WIND", "station_code": "LON-001", "measurement_property": "wind"}
 ]
 

@@ -1,28 +1,55 @@
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func, and_
-from datetime import date
-from database import get_db
+from datetime import date, timedelta, datetime
+from database import get_db, get_redis
 from models.measurement import WeatherMeasurement
 from models.forecast import UserForecast
 from schemas.weather import WeatherWidgetResponseSchema, CurrentWeatherSchema
 from schemas.measurement import IoTMeasurementSchema
 from schemas.forecast import UserForecastResponseSchema
-
-
 from typing import Dict, Optional
+import redis.asyncio as redis
+from uuid import UUID
+from decimal import Decimal
 
 router = APIRouter(prefix="/weather", tags=["Weather Widget"])
 
+# function to serialize JSON objects (UUID, Decimal, Datetime)
 
-#IOT data weather + user forecast
-  
+
+def custom_json_serializer(obj):
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    raise TypeError(
+        f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
+# IoT data + user forecast with Redis caching
 @router.get("/{city}", response_model=WeatherWidgetResponseSchema)
-async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
-   
+async def get_weather_widget(
+    city: str,
+    db: AsyncSession = Depends(get_db)
+):
+    redis_client = await get_redis()
+    cache_key = f"weather:{city.lower()}"
 
-    #get the latest IoT weather data for the city
+    # check Redis cache first
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        return json.loads(cached_data)
+
+    print("🛑 No cache found. Fetching from DB...")
+
+    # fetch latest IoT weather data
     subquery = (
         select(
             WeatherMeasurement.category,
@@ -33,7 +60,6 @@ async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
         .subquery()
     )
 
-    #get only the most recent measurement per category
     result = await db.execute(
         select(WeatherMeasurement)
         .join(
@@ -47,14 +73,10 @@ async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
     )
 
     latest_weather_data = result.scalars().all()
-
-    #organize IoT data into response format
     weather_data_dict: Dict[str, Optional[IoTMeasurementSchema]] = {}
 
     for measurement in latest_weather_data:
         category = measurement.category.lower()
-
-        #store only the latest measurement per category
         weather_data_dict[category] = IoTMeasurementSchema(
             measurement_id=measurement.measurement_id,
             sensor_id=measurement.sensor_id,
@@ -74,7 +96,7 @@ async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
         wind=weather_data_dict.get("wind")
     )
 
-    #latest user forecast for today
+    # fetch latest user forecast for today
     today = date.today()
     forecast_result = await db.execute(
         select(UserForecast)
@@ -83,7 +105,6 @@ async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
     )
     latest_forecast = forecast_result.scalar_one_or_none()
 
-    #conver forecast into correct format checking also missing forecast
     forecast_data = None
     if latest_forecast:
         forecast_data = UserForecastResponseSchema(
@@ -95,9 +116,14 @@ async def get_weather_widget(city: str, db: AsyncSession = Depends(get_db)):
             wind=latest_forecast.wind,
         ).model_dump()
 
-
-    return WeatherWidgetResponseSchema(
+    #  final response
+    response_data = WeatherWidgetResponseSchema(
         city=city,
         current_weather=current_weather if latest_weather_data else None,
         user_forecast=forecast_data
-    )
+    ).model_dump()
+
+    # store in Redis for 10min
+    await redis_client.setex(cache_key, timedelta(minutes=10).seconds, json.dumps(response_data, default=custom_json_serializer))
+
+    return response_data

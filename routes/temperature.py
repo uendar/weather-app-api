@@ -1,16 +1,33 @@
+import json
 import csv
 import io
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func
-from datetime import date, timedelta
-from database import get_db
+from datetime import date, timedelta, datetime
+from database import get_db, get_redis
 from models.measurement import WeatherMeasurement
 from models.forecast import UserForecast
 from schemas.temperature import TemperatureVisualizationSchema
-
+import redis.asyncio as redis
+from uuid import UUID
+from decimal import Decimal
+from typing import Dict, Optional
 router = APIRouter(prefix="/temperature", tags=["Temperature Visualization"])
+
+
+def custom_json_serializer(obj):
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, datetime) or isinstance(obj, date):
+        return obj.isoformat()
+    raise TypeError(
+        f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 
 #get actual (IoT) and predicted (forecast) temperature data
 @router.get("/{city}", response_model=TemperatureVisualizationSchema)
@@ -19,6 +36,15 @@ async def get_city_temperature(
     days: int = Query(5, ge=1, le=15), 
     db: AsyncSession = Depends(get_db),
 ):
+    redis_client = await get_redis()
+    cache_key = f"temperature:{city.lower()}:{days}"
+
+    # check redis
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        return json.loads(cached_data)
+
+
     start_date = date.today() - timedelta(days=days)
 
     #actual IoT temperature (latest per day, no averaging)
@@ -71,7 +97,15 @@ async def get_city_temperature(
             "predicted_temperature": forecast_temperatures.get(temp_date, None)
         })
 
-    return {"city": city, "temperature_history": temperature_data}
+    response_data = {
+        "city": city,
+        "temperature_history": temperature_data
+    }
+
+    # store in Redis
+    await redis_client.setex(cache_key, timedelta(minutes=10).seconds, json.dumps(response_data, default=custom_json_serializer))
+
+    return response_data
 
 
 #CSV file containing temperature data (actual & predicted)
