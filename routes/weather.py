@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.sql import func, and_
+from sqlalchemy.orm import aliased
 from datetime import date, timedelta, datetime
 from database import get_db, get_redis
 from models.measurement import WeatherMeasurement
@@ -11,15 +12,12 @@ from schemas.weather import WeatherWidgetResponseSchema, CurrentWeatherSchema
 from schemas.measurement import IoTMeasurementSchema
 from schemas.forecast import UserForecastResponseSchema
 from typing import Dict, Optional
-import redis.asyncio as redis
 from uuid import UUID
 from decimal import Decimal
 
 router = APIRouter(prefix="/weather", tags=["Weather Widget"])
 
-# function to serialize JSON objects (UUID, Decimal, Datetime)
-
-
+# serialize JSON objects
 def custom_json_serializer(obj):
     if isinstance(obj, UUID):
         return str(obj)
@@ -41,13 +39,13 @@ async def get_weather_widget(
 ):
     redis_client = await get_redis()
     cache_key = f"weather:{city.lower()}"
+    user_forecast_alias = aliased(UserForecast)
 
     # check Redis cache first
     cached_data = await redis_client.get(cache_key)
     if cached_data:
         return json.loads(cached_data)
 
-    print("🛑 No cache found. Fetching from DB...")
 
     # fetch latest IoT weather data
     subquery = (
@@ -68,6 +66,10 @@ async def get_weather_widget(
                 WeatherMeasurement.category == subquery.c.category,
                 WeatherMeasurement.timestamp == subquery.c.latest_timestamp,
             ),
+        )
+        .join(
+            user_forecast_alias,
+            user_forecast_alias.city == city
         )
         .where(WeatherMeasurement.sensor_id.ilike(f"{city[:3].upper()}-%"))
     )
@@ -98,10 +100,12 @@ async def get_weather_widget(
 
     # fetch latest user forecast for today
     today = date.today()
+    tomorrow = today + timedelta(days=1)
+
     forecast_result = await db.execute(
         select(UserForecast)
         .where(UserForecast.city == city)
-        .where(UserForecast.forecast_date == today)
+        .where(UserForecast.forecast_date == tomorrow)
     )
     latest_forecast = forecast_result.scalar_one_or_none()
 

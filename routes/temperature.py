@@ -13,23 +13,22 @@ from schemas.temperature import TemperatureVisualizationSchema
 import redis.asyncio as redis
 from uuid import UUID
 from decimal import Decimal
-from typing import Dict, Optional
+
 router = APIRouter(prefix="/temperature", tags=["Temperature Visualization"])
 
 
+# JSON serialization
 def custom_json_serializer(obj):
     if isinstance(obj, UUID):
         return str(obj)
     if isinstance(obj, Decimal):
         return float(obj)
-    if isinstance(obj, datetime) or isinstance(obj, date):
+    if isinstance(obj, (datetime, date)):
         return obj.isoformat()
-    raise TypeError(
-        f"Object of type {obj.__class__.__name__} is not JSON serializable")
+    return None
 
 
-
-#get actual (IoT) and predicted (forecast) temperature data
+# get actual  and predicted temperature data
 @router.get("/{city}", response_model=TemperatureVisualizationSchema)
 async def get_city_temperature(
     city: str,
@@ -39,15 +38,13 @@ async def get_city_temperature(
     redis_client = await get_redis()
     cache_key = f"temperature:{city.lower()}:{days}"
 
-    # check redis
     cached_data = await redis_client.get(cache_key)
     if cached_data:
         return json.loads(cached_data)
 
-
     start_date = date.today() - timedelta(days=days)
 
-    #actual IoT temperature (latest per day, no averaging)
+    # latest actual IoT temperature per day
     iot_subquery = (
         select(
             func.date(WeatherMeasurement.timestamp).label("date"),
@@ -67,14 +64,17 @@ async def get_city_temperature(
         )
         .join(
             iot_subquery,
-            (WeatherMeasurement.timestamp == iot_subquery.c.latest_timestamp)
+            WeatherMeasurement.timestamp == iot_subquery.c.latest_timestamp
         )
         .order_by(WeatherMeasurement.timestamp.desc())  
     )
 
-    iot_temperatures = {row.timestamp.date(): row.actual_temperature for row in iot_result}
+    iot_temperatures = {
+        row.timestamp.date(): row.actual_temperature
+        for row in iot_result if row.timestamp
+    }
 
-    #get user predicted temperature (latest per day, no averaging)
+    # get user-predicted temperature
     forecast_result = await db.execute(
         select(
             UserForecast.forecast_date,
@@ -82,33 +82,46 @@ async def get_city_temperature(
         )
         .where(UserForecast.city == city)
         .where(UserForecast.forecast_date >= start_date)
-        .group_by(UserForecast.forecast_date, UserForecast.temperature)
         .order_by(UserForecast.forecast_date.desc())
     )
-    forecast_temperatures = {row.forecast_date: row.predicted_temperature for row in forecast_result}
 
-    #combine IoT and forecast data
+    forecast_temperatures = {
+        row.forecast_date: row.predicted_temperature
+        for row in forecast_result if row.forecast_date
+    }
+
+    # IoT and forecast data
     temperature_data = []
     for day_offset in range(days):
         temp_date = date.today() - timedelta(days=day_offset)
-        temperature_data.append({
-            "date": temp_date,
-            "current_temperature": iot_temperatures.get(temp_date, None),
-            "predicted_temperature": forecast_temperatures.get(temp_date, None)
-        })
+        current_temp = iot_temperatures.get(temp_date, None)
+        predicted_temp = forecast_temperatures.get(temp_date, None)
+
+        # dates where at least one temperature exists
+        if current_temp is not None or predicted_temp is not None:
+            temperature_data.append({
+                "date": temp_date,
+                "current_temperature": current_temp,
+                "predicted_temperature": predicted_temp
+            })
+
 
     response_data = {
         "city": city,
         "temperature_history": temperature_data
     }
 
-    # store in Redis
-    await redis_client.setex(cache_key, timedelta(minutes=10).seconds, json.dumps(response_data, default=custom_json_serializer))
+    # redis store
+    await redis_client.setex(
+        cache_key,
+        timedelta(minutes=10).seconds,
+        json.dumps(response_data, default=custom_json_serializer)
+    )
 
     return response_data
 
 
-#CSV file containing temperature data (actual & predicted)
+# donwload csv temperatures
 @router.get("/{city}/download", response_class=Response)
 async def download_city_temperature_csv(
     city: str,
@@ -117,7 +130,7 @@ async def download_city_temperature_csv(
 ):
     start_date = date.today() - timedelta(days=days)
 
-    #actual IoT temperature (raw values per day)
+    # get raw IoT temperature per day
     iot_result = await db.execute(
         select(
             func.date(WeatherMeasurement.timestamp).label("date"),
@@ -129,9 +142,13 @@ async def download_city_temperature_csv(
         .group_by(func.date(WeatherMeasurement.timestamp), WeatherMeasurement.measurement_value)
         .order_by(func.date(WeatherMeasurement.timestamp).desc())
     )
-    iot_temperatures = {row.date: row.actual_temperature for row in iot_result}
 
-    #get user-predicted temperature (raw values per day)
+    iot_temperatures = {
+        row.date: row.actual_temperature
+        for row in iot_result if row.date
+    }
+
+    # get user-predicted temperature
     forecast_result = await db.execute(
         select(
             UserForecast.forecast_date,
@@ -139,12 +156,15 @@ async def download_city_temperature_csv(
         )
         .where(UserForecast.city == city)
         .where(UserForecast.forecast_date >= start_date)
-        .group_by(UserForecast.forecast_date, UserForecast.temperature)
         .order_by(UserForecast.forecast_date.desc())
     )
-    forecast_temperatures = {row.forecast_date: row.predicted_temperature for row in forecast_result}
 
-    #merge data into CSV format
+    forecast_temperatures = {
+        row.forecast_date: row.predicted_temperature
+        for row in forecast_result if row.forecast_date
+    }
+
+    # merge data into csv formatt
     csv_data = [["Date", "Current Temperature", "Predicted Temperature"]]
     for day_offset in range(days):
         temp_date = date.today() - timedelta(days=day_offset)
@@ -154,13 +174,13 @@ async def download_city_temperature_csv(
             forecast_temperatures.get(temp_date, "")
         ])
 
-    #write CSV file
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerows(csv_data)
     output.seek(0)
 
-    #CSV file
+    # csv File
     return Response(
         content=output.getvalue(),
         media_type="text/csv",

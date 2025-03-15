@@ -2,7 +2,6 @@ import asyncio
 import random
 from datetime import datetime
 from uuid import uuid4
-
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -48,7 +47,7 @@ async def simulate_iot_data(db: AsyncSession):
                 sensor_exists = result.scalar_one_or_none()
 
                 if not sensor_exists:
-                    print(f"⚠️ Sensor {sensor_id} does not exist in database, skipping...")
+                    print(f"Sensor {sensor_id} does not exist in database, skipping...")
                     continue
 
                 #create measurement data

@@ -1,10 +1,21 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from routes import iot_router, forecasts_router, weather_router, temperature_router
 from database import init_db
 
 app = FastAPI()
 
-# Include Routes
+
+# enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# routes
 app.include_router(iot_router)
 app.include_router(forecasts_router)
 app.include_router(weather_router)

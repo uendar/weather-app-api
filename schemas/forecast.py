@@ -3,7 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import date
 
-# User-submitted Forecasts
+# user-submitted forecasts
 class UserForecastCreateSchema(BaseModel):
     city: str = Field(..., max_length=100)
     temperature: float

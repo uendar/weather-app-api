@@ -2,7 +2,7 @@ import uuid
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-#inner "info" structure from IoT response
+# structure from IoT response
 class IoTMeasurementInfoSchema(BaseModel):
     category: str
     measurement: float

@@ -7,18 +7,18 @@ from models import Base
 
 load_dotenv()
 
-# PostgreSQL & Redis URLs from environment variables
+# environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 REDIS_URL = os.getenv("REDIS_URL", "redis://weather-redis:6379")
 
 if not DATABASE_URL:
     raise ValueError("Missing DATABASE_URL in environment variables!")
 
-# init PostgreSQL database connection
+# init  database connection
 engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-# init Redis
+# init redis
 redis_client = None
 
 

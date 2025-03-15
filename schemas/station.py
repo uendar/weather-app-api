@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-#Meteorological Stations
+# stations
 class StationSchema(BaseModel):
     code: str = Field(..., max_length=20)
     city: str = Field(..., max_length=50)
